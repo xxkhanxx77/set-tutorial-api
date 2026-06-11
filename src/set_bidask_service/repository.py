@@ -19,6 +19,75 @@ class MarketRepository:
     def __init__(self, pool: ConnectionPool):
         self.pool = pool
 
+    def save_order_book(
+        self,
+        *,
+        symbol: str,
+        source: str,
+        bids: list[tuple[Any, Any]],
+        asks: list[tuple[Any, Any]],
+        raw: dict[str, Any],
+        bid_flag: str = "",
+        ask_flag: str = "",
+    ) -> int:
+        normalized_symbol = symbol.upper()
+        levels: list[dict[str, Any]] = []
+        for level in range(1, 11):
+            bid = bids[level - 1] if level <= len(bids) else (None, 0)
+            ask = asks[level - 1] if level <= len(asks) else (None, 0)
+            levels.append(
+                {
+                    "side": "bid",
+                    "level": level,
+                    "price": to_decimal(bid[0]),
+                    "volume": to_decimal(bid[1]) or 0,
+                }
+            )
+            levels.append(
+                {
+                    "side": "ask",
+                    "level": level,
+                    "price": to_decimal(ask[0]),
+                    "volume": to_decimal(ask[1]) or 0,
+                }
+            )
+
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO bidask_snapshots (symbol, source, bid_flag, ask_flag, raw)
+                    VALUES (%s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (
+                        normalized_symbol,
+                        source,
+                        bid_flag,
+                        ask_flag,
+                        Jsonb(raw),
+                    ),
+                )
+                snapshot_id = cur.fetchone()[0]
+                cur.executemany(
+                    """
+                    INSERT INTO bidask_levels (snapshot_id, side, level, price, volume)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    [
+                        (
+                            snapshot_id,
+                            row["side"],
+                            row["level"],
+                            row["price"],
+                            row["volume"],
+                        )
+                        for row in levels
+                    ],
+                )
+            conn.commit()
+        return int(snapshot_id)
+
     def save_bid_offer(self, data: dict[str, Any]) -> int:
         symbol = str(data.get("symbol") or "").upper()
         if not symbol:
@@ -198,4 +267,3 @@ class MarketRepository:
                     (symbol.upper(), bounded_limit),
                 )
                 return list(cur.fetchall())
-

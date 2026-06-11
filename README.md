@@ -34,6 +34,8 @@ If `SUBSCRIBE_PRICE_INFO=true`, price info events are saved to `price_info_ticks
 
 Optional candlestick backfills are saved to `candlesticks`.
 
+If `ENABLE_BINANCE_TH_COLLECTOR=true`, Binance TH depth snapshots are saved into the same `bidask_snapshots` and `bidask_levels` tables with `source='binance_th'`.
+
 ## Project Structure
 
 ```text
@@ -74,6 +76,10 @@ ENABLE_COLLECTOR=true
 SUBSCRIBE_PRICE_INFO=true
 SNAPSHOT_MIN_INTERVAL_MS=0
 LOG_LEVEL=INFO
+ENABLE_BINANCE_TH_COLLECTOR=false
+BINANCE_TH_SYMBOLS=USDTTHB
+BINANCE_TH_DEPTH_LIMIT=10
+BINANCE_TH_POLL_INTERVAL_SECONDS=1.0
 ```
 
 Notes:
@@ -82,6 +88,7 @@ Notes:
 - Use `SETTRADE_ENV=uat`, `SETTRADE_APP_CODE=SANDBOX`, and `SETTRADE_BROKER_ID=SANDBOX` for sandbox credentials.
 - `SETTRADE_SYMBOLS` is comma-separated. Use only symbols your Settrade account can access.
 - `SNAPSHOT_MIN_INTERVAL_MS=0` saves every bid/offer event. Increase it, for example to `250`, if the database write volume is too high.
+- `BINANCE_TH_SYMBOLS` is comma-separated and uses Binance TH symbols such as `USDTTHB` or `BTCTHB`. Binance TH public market data does not require an API key.
 
 ## 2. Run Locally
 
@@ -128,6 +135,8 @@ railway variables set SETTRADE_ENV="prod"
 railway variables set SETTRADE_SYMBOLS="AOT,PTT"
 railway variables set ENABLE_COLLECTOR="true"
 railway variables set SUBSCRIBE_PRICE_INFO="true"
+railway variables set ENABLE_BINANCE_TH_COLLECTOR="true"
+railway variables set BINANCE_TH_SYMBOLS="USDTTHB"
 ```
 
 Deploy:
@@ -186,6 +195,26 @@ WHERE s.symbol = 'AOT'
 GROUP BY s.id, s.symbol, s.received_at
 ORDER BY s.received_at DESC
 LIMIT 100;
+```
+
+Latest Binance TH 10-level book:
+
+```sql
+SELECT *
+FROM latest_bidask_10_levels
+WHERE source = 'binance_th'
+  AND symbol = 'USDTTHB'
+ORDER BY level;
+```
+
+Latest Settrade TFEX 10-level book:
+
+```sql
+SELECT *
+FROM latest_bidask_10_levels
+WHERE source = 'settrade'
+  AND symbol = 'USDM26'
+ORDER BY level;
 ```
 
 ## 5. Optional Candlestick Backfill

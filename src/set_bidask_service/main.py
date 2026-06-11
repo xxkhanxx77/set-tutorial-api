@@ -10,6 +10,7 @@ from psycopg_pool import ConnectionPool
 from settrade_v2 import __version__ as settrade_sdk_version
 
 from set_bidask_service import __version__
+from set_bidask_service.binance_th import BinanceThDepthCollector
 from set_bidask_service.collector import RealtimeCollector
 from set_bidask_service.config import Settings, get_settings
 from set_bidask_service.db import check_database, create_pool, init_schema
@@ -21,6 +22,7 @@ class AppState:
     pool: ConnectionPool | None = None
     repository: MarketRepository | None = None
     collector: RealtimeCollector | None = None
+    binance_th_collector: BinanceThDepthCollector | None = None
     startup_errors: list[str]
 
     def __init__(self) -> None:
@@ -42,6 +44,7 @@ async def lifespan(app: FastAPI):
     state.pool = None
     state.repository = None
     state.collector = None
+    state.binance_th_collector = None
     state.startup_errors = []
 
     if settings.database_url:
@@ -70,11 +73,24 @@ async def lifespan(app: FastAPI):
         reason = missing or "database is not ready"
         state.startup_errors.append(f"collector not started: {reason}")
 
+    if settings.enable_binance_th_collector and state.repository and settings.binance_symbols:
+        state.binance_th_collector = BinanceThDepthCollector(settings, state.repository)
+        state.binance_th_collector.start()
+    elif settings.enable_binance_th_collector:
+        reason = (
+            "BINANCE_TH_SYMBOLS is not configured"
+            if not settings.binance_symbols
+            else "database is not ready"
+        )
+        state.startup_errors.append(f"Binance TH collector not started: {reason}")
+
     try:
         yield
     finally:
         if state.collector:
             state.collector.stop()
+        if state.binance_th_collector:
+            state.binance_th_collector.stop()
         if state.pool:
             state.pool.close()
 
@@ -101,13 +117,21 @@ def root() -> dict[str, Any]:
 def health() -> dict[str, Any]:
     settings = state.settings
     collector_state = state.collector.state.snapshot() if state.collector else None
+    binance_th_state = (
+        state.binance_th_collector.state.snapshot() if state.binance_th_collector else None
+    )
     return {
         "status": "ok",
         "service": "settrade-bidask-railway",
         "version": __version__,
         "collector_enabled": settings.enable_collector if settings else False,
         "collector": collector_state,
+        "binance_th_collector_enabled": (
+            settings.enable_binance_th_collector if settings else False
+        ),
+        "binance_th_collector": binance_th_state,
         "symbols": settings.symbols if settings else [],
+        "binance_th_symbols": settings.binance_symbols if settings else [],
         "ready": "/ready",
     }
 
@@ -129,7 +153,15 @@ def ready(response: Response) -> dict[str, Any]:
 
     missing_settrade_vars = settings.missing_settrade_vars if settings else []
     collector_state = state.collector.state.snapshot() if state.collector else None
-    is_ready = db_ok and not missing_settrade_vars
+    binance_th_state = (
+        state.binance_th_collector.state.snapshot() if state.binance_th_collector else None
+    )
+    binance_th_ready = (
+        not settings
+        or not settings.enable_binance_th_collector
+        or bool(settings.binance_symbols)
+    )
+    is_ready = db_ok and not missing_settrade_vars and binance_th_ready
 
     if not is_ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -141,7 +173,12 @@ def ready(response: Response) -> dict[str, Any]:
         "missing_settrade_vars": missing_settrade_vars,
         "collector_enabled": settings.enable_collector if settings else False,
         "collector": collector_state,
+        "binance_th_collector_enabled": (
+            settings.enable_binance_th_collector if settings else False
+        ),
+        "binance_th_collector": binance_th_state,
         "symbols": settings.symbols if settings else [],
+        "binance_th_symbols": settings.binance_symbols if settings else [],
         "settrade_sdk_version": settrade_sdk_version,
         "startup_errors": state.startup_errors,
     }

@@ -12,14 +12,33 @@ CREATE TABLE IF NOT EXISTS bidask_snapshots (
 CREATE INDEX IF NOT EXISTS idx_bidask_snapshots_symbol_received_at
     ON bidask_snapshots (symbol, received_at DESC);
 
+DROP VIEW IF EXISTS latest_bidask_10_levels;
+DROP VIEW IF EXISTS latest_bidask_snapshots;
+
 CREATE TABLE IF NOT EXISTS bidask_levels (
     snapshot_id BIGINT NOT NULL REFERENCES bidask_snapshots(id) ON DELETE CASCADE,
     side TEXT NOT NULL CHECK (side IN ('bid', 'ask')),
     level SMALLINT NOT NULL CHECK (level BETWEEN 1 AND 10),
     price NUMERIC(20, 8),
-    volume BIGINT NOT NULL DEFAULT 0,
+    volume NUMERIC(28, 8) NOT NULL DEFAULT 0,
     PRIMARY KEY (snapshot_id, side, level)
 );
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'bidask_levels'
+          AND column_name = 'volume'
+          AND data_type <> 'numeric'
+    ) THEN
+        ALTER TABLE bidask_levels
+            ALTER COLUMN volume TYPE NUMERIC(28, 8)
+            USING volume::NUMERIC(28, 8);
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_bidask_levels_snapshot_side_level
     ON bidask_levels (snapshot_id, side, level);
@@ -65,7 +84,7 @@ CREATE INDEX IF NOT EXISTS idx_candlesticks_symbol_interval_time
 
 CREATE OR REPLACE VIEW latest_bidask_snapshots AS
 WITH latest AS (
-    SELECT DISTINCT ON (symbol)
+    SELECT DISTINCT ON (source, symbol)
         id,
         symbol,
         source,
@@ -73,7 +92,7 @@ WITH latest AS (
         bid_flag,
         ask_flag
     FROM bidask_snapshots
-    ORDER BY symbol, received_at DESC
+    ORDER BY source, symbol, received_at DESC
 )
 SELECT
     latest.id AS snapshot_id,
@@ -98,7 +117,7 @@ GROUP BY
 
 CREATE OR REPLACE VIEW latest_bidask_10_levels AS
 WITH latest AS (
-    SELECT DISTINCT ON (symbol)
+    SELECT DISTINCT ON (source, symbol)
         id,
         symbol,
         source,
@@ -106,7 +125,7 @@ WITH latest AS (
         bid_flag,
         ask_flag
     FROM bidask_snapshots
-    ORDER BY symbol, received_at DESC
+    ORDER BY source, symbol, received_at DESC
 ),
 levels AS (
     SELECT generate_series(1, 10)::SMALLINT AS level
@@ -133,5 +152,5 @@ LEFT JOIN bidask_levels ask
     ON ask.snapshot_id = latest.id
     AND ask.side = 'ask'
     AND ask.level = levels.level
-ORDER BY latest.symbol, levels.level;
+ORDER BY latest.source, latest.symbol, levels.level;
 """
