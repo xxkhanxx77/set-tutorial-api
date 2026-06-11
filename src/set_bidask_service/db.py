@@ -8,7 +8,7 @@ def create_pool(database_url: str) -> ConnectionPool:
         conninfo=database_url,
         min_size=1,
         max_size=5,
-        kwargs={"autocommit": False},
+        kwargs={"autocommit": False, "connect_timeout": 5},
         open=False,
     )
 
@@ -25,4 +25,3 @@ def check_database(pool: ConnectionPool) -> bool:
         with conn.cursor() as cur:
             cur.execute("SELECT 1")
             return cur.fetchone()[0] == 1
-

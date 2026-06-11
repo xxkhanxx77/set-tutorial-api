@@ -97,13 +97,20 @@ Start the service:
 uv run uvicorn set_bidask_service.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+If your environment has not installed the package yet, run with the source app directory explicitly:
+
+```bash
+uv run uvicorn --app-dir src set_bidask_service.main:app --reload --host 0.0.0.0 --port 8000
+```
+
 Open:
 
 - <http://localhost:8000/health>
+- <http://localhost:8000/ready>
 - <http://localhost:8000/latest/AOT>
 - <http://localhost:8000/docs>
 
-The app creates tables automatically on startup.
+The app creates tables automatically on startup when `DATABASE_URL` is configured. `/health` is a liveness endpoint for Railway and should return HTTP 200 as long as the web server is running. `/ready` checks database and Settrade configuration and returns HTTP 503 until required variables are present.
 
 ## 3. Deploy To Railway
 
@@ -132,7 +139,7 @@ railway up
 Railway will run:
 
 ```bash
-uvicorn set_bidask_service.main:app --host 0.0.0.0 --port $PORT
+uvicorn --app-dir src set_bidask_service.main:app --host 0.0.0.0 --port $PORT
 ```
 
 After deploy, check:
@@ -208,4 +215,3 @@ uv run python -m set_bidask_service.backfill_candles \
 uv run pytest
 uv run ruff check .
 ```
-

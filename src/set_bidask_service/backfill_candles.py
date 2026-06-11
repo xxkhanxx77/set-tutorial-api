@@ -34,6 +34,12 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = parse_args()
     settings = get_settings()
+    if not settings.database_url:
+        raise SystemExit("DATABASE_URL is required for candlestick backfill")
+    if settings.missing_settrade_vars:
+        missing = ", ".join(settings.missing_settrade_vars)
+        raise SystemExit(f"Missing Settrade configuration: {missing}")
+
     settrade_config["environment"] = settings.settrade_env
 
     pool = create_pool(settings.database_url)
