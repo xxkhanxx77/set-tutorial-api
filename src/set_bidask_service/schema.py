@@ -62,5 +62,76 @@ CREATE TABLE IF NOT EXISTS candlesticks (
 
 CREATE INDEX IF NOT EXISTS idx_candlesticks_symbol_interval_time
     ON candlesticks (symbol, interval, candle_time DESC);
-"""
 
+CREATE OR REPLACE VIEW latest_bidask_snapshots AS
+WITH latest AS (
+    SELECT DISTINCT ON (symbol)
+        id,
+        symbol,
+        source,
+        received_at,
+        bid_flag,
+        ask_flag
+    FROM bidask_snapshots
+    ORDER BY symbol, received_at DESC
+)
+SELECT
+    latest.id AS snapshot_id,
+    latest.symbol,
+    latest.source,
+    latest.received_at,
+    latest.bid_flag,
+    latest.ask_flag,
+    MAX(levels.price) FILTER (WHERE levels.side = 'bid' AND levels.level = 1) AS best_bid,
+    MAX(levels.volume) FILTER (WHERE levels.side = 'bid' AND levels.level = 1) AS best_bid_volume,
+    MAX(levels.price) FILTER (WHERE levels.side = 'ask' AND levels.level = 1) AS best_ask,
+    MAX(levels.volume) FILTER (WHERE levels.side = 'ask' AND levels.level = 1) AS best_ask_volume
+FROM latest
+LEFT JOIN bidask_levels levels ON levels.snapshot_id = latest.id
+GROUP BY
+    latest.id,
+    latest.symbol,
+    latest.source,
+    latest.received_at,
+    latest.bid_flag,
+    latest.ask_flag;
+
+CREATE OR REPLACE VIEW latest_bidask_10_levels AS
+WITH latest AS (
+    SELECT DISTINCT ON (symbol)
+        id,
+        symbol,
+        source,
+        received_at,
+        bid_flag,
+        ask_flag
+    FROM bidask_snapshots
+    ORDER BY symbol, received_at DESC
+),
+levels AS (
+    SELECT generate_series(1, 10)::SMALLINT AS level
+)
+SELECT
+    latest.id AS snapshot_id,
+    latest.symbol,
+    latest.source,
+    latest.received_at,
+    latest.bid_flag,
+    latest.ask_flag,
+    levels.level,
+    bid.price AS bid_price,
+    bid.volume AS bid_volume,
+    ask.price AS ask_price,
+    ask.volume AS ask_volume
+FROM latest
+CROSS JOIN levels
+LEFT JOIN bidask_levels bid
+    ON bid.snapshot_id = latest.id
+    AND bid.side = 'bid'
+    AND bid.level = levels.level
+LEFT JOIN bidask_levels ask
+    ON ask.snapshot_id = latest.id
+    AND ask.side = 'ask'
+    AND ask.level = levels.level
+ORDER BY latest.symbol, levels.level;
+"""
