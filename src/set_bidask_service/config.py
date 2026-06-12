@@ -32,6 +32,48 @@ class Settings(BaseSettings):
         alias="BINANCE_TH_POLL_INTERVAL_SECONDS",
     )
 
+    enable_bybit_tradfi_collector: bool = Field(
+        default=False,
+        alias="ENABLE_BYBIT_TRADFI_COLLECTOR",
+    )
+    bybit_tradfi_symbols: str = Field(default="", alias="BYBIT_TRADFI_SYMBOLS")
+    bybit_tradfi_base_url: str = Field(
+        default="https://api2.bybit.com",
+        alias="BYBIT_TRADFI_BASE_URL",
+    )
+    bybit_tradfi_poll_interval_seconds: float = Field(
+        default=1.0,
+        alias="BYBIT_TRADFI_POLL_INTERVAL_SECONDS",
+    )
+    bybit_tradfi_candle_interval: str = Field(
+        default="30",
+        alias="BYBIT_TRADFI_CANDLE_INTERVAL",
+    )
+    bybit_tradfi_candle_limit: int = Field(
+        default=2,
+        alias="BYBIT_TRADFI_CANDLE_LIMIT",
+    )
+    bybit_tradfi_candle_poll_interval_seconds: float = Field(
+        default=60.0,
+        alias="BYBIT_TRADFI_CANDLE_POLL_INTERVAL_SECONDS",
+    )
+
+    enable_bybit_v5_collector: bool = Field(default=False, alias="ENABLE_BYBIT_V5_COLLECTOR")
+    bybit_v5_symbols: str = Field(default="", alias="BYBIT_V5_SYMBOLS")
+    bybit_v5_category: Literal["spot", "linear", "inverse", "option"] = Field(
+        default="linear",
+        alias="BYBIT_V5_CATEGORY",
+    )
+    bybit_v5_depth_limit: int = Field(default=5, alias="BYBIT_V5_DEPTH_LIMIT")
+    bybit_v5_poll_interval_seconds: float = Field(
+        default=1.0,
+        alias="BYBIT_V5_POLL_INTERVAL_SECONDS",
+    )
+    bybit_v5_base_url: str = Field(
+        default="https://api.bybit.com",
+        alias="BYBIT_V5_BASE_URL",
+    )
+
     @field_validator(
         "database_url",
         "settrade_app_id",
@@ -67,6 +109,34 @@ class Settings(BaseSettings):
             raise ValueError("BINANCE_TH_POLL_INTERVAL_SECONDS must be at least 0.25")
         return value
 
+    @field_validator("bybit_tradfi_poll_interval_seconds", "bybit_v5_poll_interval_seconds")
+    @classmethod
+    def validate_fast_poll_interval(cls, value: float) -> float:
+        if value < 0.25:
+            raise ValueError("Bybit poll interval must be at least 0.25 seconds")
+        return value
+
+    @field_validator("bybit_tradfi_candle_poll_interval_seconds")
+    @classmethod
+    def validate_bybit_tradfi_candle_poll_interval(cls, value: float) -> float:
+        if value < 10:
+            raise ValueError("BYBIT_TRADFI_CANDLE_POLL_INTERVAL_SECONDS must be at least 10")
+        return value
+
+    @field_validator("bybit_tradfi_candle_limit")
+    @classmethod
+    def validate_bybit_tradfi_candle_limit(cls, value: int) -> int:
+        if value < 1 or value > 200:
+            raise ValueError("BYBIT_TRADFI_CANDLE_LIMIT must be between 1 and 200")
+        return value
+
+    @field_validator("bybit_v5_depth_limit")
+    @classmethod
+    def validate_bybit_v5_depth_limit(cls, value: int) -> int:
+        if value < 1 or value > 10:
+            raise ValueError("BYBIT_V5_DEPTH_LIMIT must be between 1 and 10")
+        return value
+
     @property
     def symbols(self) -> list[str]:
         raw = self.settrade_symbols or self.settrade_symbol or ""
@@ -78,6 +148,24 @@ class Settings(BaseSettings):
         symbols = [
             symbol.strip().upper()
             for symbol in self.binance_th_symbols.split(",")
+            if symbol.strip()
+        ]
+        return list(dict.fromkeys(symbols))
+
+    @property
+    def bybit_tradfi_symbol_list(self) -> list[str]:
+        symbols = [
+            symbol.strip().upper()
+            for symbol in self.bybit_tradfi_symbols.split(",")
+            if symbol.strip()
+        ]
+        return list(dict.fromkeys(symbols))
+
+    @property
+    def bybit_v5_symbol_list(self) -> list[str]:
+        symbols = [
+            symbol.strip().upper()
+            for symbol in self.bybit_v5_symbols.split(",")
             if symbol.strip()
         ]
         return list(dict.fromkeys(symbols))

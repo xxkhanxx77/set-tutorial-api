@@ -14,6 +14,7 @@ CREATE INDEX IF NOT EXISTS idx_bidask_snapshots_symbol_received_at
 
 DROP VIEW IF EXISTS latest_bidask_10_levels;
 DROP VIEW IF EXISTS latest_bidask_snapshots;
+DROP VIEW IF EXISTS latest_quote_ticks;
 
 CREATE TABLE IF NOT EXISTS bidask_levels (
     snapshot_id BIGINT NOT NULL REFERENCES bidask_snapshots(id) ON DELETE CASCADE,
@@ -63,6 +64,26 @@ CREATE TABLE IF NOT EXISTS price_info_ticks (
 CREATE INDEX IF NOT EXISTS idx_price_info_ticks_symbol_received_at
     ON price_info_ticks (symbol, received_at DESC);
 
+CREATE TABLE IF NOT EXISTS quote_ticks (
+    id BIGSERIAL PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    source TEXT NOT NULL,
+    received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    bid NUMERIC(20, 8),
+    ask NUMERIC(20, 8),
+    last NUMERIC(20, 8),
+    open NUMERIC(20, 8),
+    high NUMERIC(20, 8),
+    low NUMERIC(20, 8),
+    close NUMERIC(20, 8),
+    change NUMERIC(20, 8),
+    spread NUMERIC(20, 8),
+    raw JSONB NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_quote_ticks_source_symbol_received_at
+    ON quote_ticks (source, symbol, received_at DESC);
+
 CREATE TABLE IF NOT EXISTS candlesticks (
     symbol TEXT NOT NULL,
     interval TEXT NOT NULL,
@@ -81,6 +102,25 @@ CREATE TABLE IF NOT EXISTS candlesticks (
 
 CREATE INDEX IF NOT EXISTS idx_candlesticks_symbol_interval_time
     ON candlesticks (symbol, interval, candle_time DESC);
+
+CREATE OR REPLACE VIEW latest_quote_ticks AS
+SELECT DISTINCT ON (source, symbol)
+    id,
+    symbol,
+    source,
+    received_at,
+    bid,
+    ask,
+    last,
+    open,
+    high,
+    low,
+    close,
+    change,
+    spread,
+    raw
+FROM quote_ticks
+ORDER BY source, symbol, received_at DESC;
 
 CREATE OR REPLACE VIEW latest_bidask_snapshots AS
 WITH latest AS (

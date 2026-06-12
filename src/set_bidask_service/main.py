@@ -11,6 +11,7 @@ from settrade_v2 import __version__ as settrade_sdk_version
 
 from set_bidask_service import __version__
 from set_bidask_service.binance_th import BinanceThDepthCollector
+from set_bidask_service.bybit import BybitTradfiCollector, BybitV5OrderbookCollector
 from set_bidask_service.collector import RealtimeCollector
 from set_bidask_service.config import Settings, get_settings
 from set_bidask_service.db import check_database, create_pool, init_schema
@@ -23,6 +24,8 @@ class AppState:
     repository: MarketRepository | None = None
     collector: RealtimeCollector | None = None
     binance_th_collector: BinanceThDepthCollector | None = None
+    bybit_tradfi_collector: BybitTradfiCollector | None = None
+    bybit_v5_collector: BybitV5OrderbookCollector | None = None
     startup_errors: list[str]
 
     def __init__(self) -> None:
@@ -45,6 +48,8 @@ async def lifespan(app: FastAPI):
     state.repository = None
     state.collector = None
     state.binance_th_collector = None
+    state.bybit_tradfi_collector = None
+    state.bybit_v5_collector = None
     state.startup_errors = []
 
     if settings.database_url:
@@ -84,6 +89,32 @@ async def lifespan(app: FastAPI):
         )
         state.startup_errors.append(f"Binance TH collector not started: {reason}")
 
+    if (
+        settings.enable_bybit_tradfi_collector
+        and state.repository
+        and settings.bybit_tradfi_symbol_list
+    ):
+        state.bybit_tradfi_collector = BybitTradfiCollector(settings, state.repository)
+        state.bybit_tradfi_collector.start()
+    elif settings.enable_bybit_tradfi_collector:
+        reason = (
+            "BYBIT_TRADFI_SYMBOLS is not configured"
+            if not settings.bybit_tradfi_symbol_list
+            else "database is not ready"
+        )
+        state.startup_errors.append(f"Bybit TradFi collector not started: {reason}")
+
+    if settings.enable_bybit_v5_collector and state.repository and settings.bybit_v5_symbol_list:
+        state.bybit_v5_collector = BybitV5OrderbookCollector(settings, state.repository)
+        state.bybit_v5_collector.start()
+    elif settings.enable_bybit_v5_collector:
+        reason = (
+            "BYBIT_V5_SYMBOLS is not configured"
+            if not settings.bybit_v5_symbol_list
+            else "database is not ready"
+        )
+        state.startup_errors.append(f"Bybit V5 collector not started: {reason}")
+
     try:
         yield
     finally:
@@ -91,6 +122,10 @@ async def lifespan(app: FastAPI):
             state.collector.stop()
         if state.binance_th_collector:
             state.binance_th_collector.stop()
+        if state.bybit_tradfi_collector:
+            state.bybit_tradfi_collector.stop()
+        if state.bybit_v5_collector:
+            state.bybit_v5_collector.stop()
         if state.pool:
             state.pool.close()
 
@@ -120,6 +155,12 @@ def health() -> dict[str, Any]:
     binance_th_state = (
         state.binance_th_collector.state.snapshot() if state.binance_th_collector else None
     )
+    bybit_tradfi_state = (
+        state.bybit_tradfi_collector.state.snapshot() if state.bybit_tradfi_collector else None
+    )
+    bybit_v5_state = (
+        state.bybit_v5_collector.state.snapshot() if state.bybit_v5_collector else None
+    )
     return {
         "status": "ok",
         "service": "settrade-bidask-railway",
@@ -130,8 +171,17 @@ def health() -> dict[str, Any]:
             settings.enable_binance_th_collector if settings else False
         ),
         "binance_th_collector": binance_th_state,
+        "bybit_tradfi_collector_enabled": (
+            settings.enable_bybit_tradfi_collector if settings else False
+        ),
+        "bybit_tradfi_collector": bybit_tradfi_state,
+        "bybit_v5_collector_enabled": settings.enable_bybit_v5_collector if settings else False,
+        "bybit_v5_collector": bybit_v5_state,
         "symbols": settings.symbols if settings else [],
         "binance_th_symbols": settings.binance_symbols if settings else [],
+        "bybit_tradfi_symbols": settings.bybit_tradfi_symbol_list if settings else [],
+        "bybit_v5_symbols": settings.bybit_v5_symbol_list if settings else [],
+        "bybit_v5_category": settings.bybit_v5_category if settings else None,
         "ready": "/ready",
     }
 
@@ -151,17 +201,41 @@ def ready(response: Response) -> dict[str, Any]:
     else:
         db_error = "database pool is not available"
 
-    missing_settrade_vars = settings.missing_settrade_vars if settings else []
     collector_state = state.collector.state.snapshot() if state.collector else None
     binance_th_state = (
         state.binance_th_collector.state.snapshot() if state.binance_th_collector else None
+    )
+    bybit_tradfi_state = (
+        state.bybit_tradfi_collector.state.snapshot() if state.bybit_tradfi_collector else None
+    )
+    bybit_v5_state = (
+        state.bybit_v5_collector.state.snapshot() if state.bybit_v5_collector else None
+    )
+    missing_settrade_vars = (
+        settings.missing_settrade_vars if settings and settings.enable_collector else []
     )
     binance_th_ready = (
         not settings
         or not settings.enable_binance_th_collector
         or bool(settings.binance_symbols)
     )
-    is_ready = db_ok and not missing_settrade_vars and binance_th_ready
+    bybit_tradfi_ready = (
+        not settings
+        or not settings.enable_bybit_tradfi_collector
+        or bool(settings.bybit_tradfi_symbol_list)
+    )
+    bybit_v5_ready = (
+        not settings
+        or not settings.enable_bybit_v5_collector
+        or bool(settings.bybit_v5_symbol_list)
+    )
+    is_ready = (
+        db_ok
+        and not missing_settrade_vars
+        and binance_th_ready
+        and bybit_tradfi_ready
+        and bybit_v5_ready
+    )
 
     if not is_ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -177,8 +251,17 @@ def ready(response: Response) -> dict[str, Any]:
             settings.enable_binance_th_collector if settings else False
         ),
         "binance_th_collector": binance_th_state,
+        "bybit_tradfi_collector_enabled": (
+            settings.enable_bybit_tradfi_collector if settings else False
+        ),
+        "bybit_tradfi_collector": bybit_tradfi_state,
+        "bybit_v5_collector_enabled": settings.enable_bybit_v5_collector if settings else False,
+        "bybit_v5_collector": bybit_v5_state,
         "symbols": settings.symbols if settings else [],
         "binance_th_symbols": settings.binance_symbols if settings else [],
+        "bybit_tradfi_symbols": settings.bybit_tradfi_symbol_list if settings else [],
+        "bybit_v5_symbols": settings.bybit_v5_symbol_list if settings else [],
+        "bybit_v5_category": settings.bybit_v5_category if settings else None,
         "settrade_sdk_version": settrade_sdk_version,
         "startup_errors": state.startup_errors,
     }
@@ -188,7 +271,12 @@ def ready(response: Response) -> dict[str, Any]:
 def symbols() -> dict[str, list[str]]:
     if state.settings is None:
         raise HTTPException(status_code=503, detail="Application settings are not loaded")
-    return {"symbols": state.settings.symbols}
+    return {
+        "settrade_symbols": state.settings.symbols,
+        "binance_th_symbols": state.settings.binance_symbols,
+        "bybit_tradfi_symbols": state.settings.bybit_tradfi_symbol_list,
+        "bybit_v5_symbols": state.settings.bybit_v5_symbol_list,
+    }
 
 
 @app.get("/latest/{symbol}")

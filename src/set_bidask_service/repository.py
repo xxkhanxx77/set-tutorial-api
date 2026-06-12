@@ -164,6 +164,53 @@ class MarketRepository:
             conn.commit()
         return int(tick_id)
 
+    def save_quote_tick(
+        self,
+        *,
+        symbol: str,
+        source: str,
+        raw: dict[str, Any],
+        bid: Any = None,
+        ask: Any = None,
+        last: Any = None,
+        open_price: Any = None,
+        high: Any = None,
+        low: Any = None,
+        close: Any = None,
+        change: Any = None,
+        spread: Any = None,
+    ) -> int:
+        normalized_symbol = symbol.upper()
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO quote_ticks (
+                        symbol, source, bid, ask, last, open, high, low,
+                        close, change, spread, raw
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (
+                        normalized_symbol,
+                        source,
+                        to_decimal(bid),
+                        to_decimal(ask),
+                        to_decimal(last),
+                        to_decimal(open_price),
+                        to_decimal(high),
+                        to_decimal(low),
+                        to_decimal(close),
+                        to_decimal(change),
+                        to_decimal(spread),
+                        Jsonb(raw),
+                    ),
+                )
+                tick_id = cur.fetchone()[0]
+            conn.commit()
+        return int(tick_id)
+
     def save_candlesticks(self, payload: Any, fallback_symbol: str, interval: str) -> int:
         candles = extract_candles(payload)
         rows = []
@@ -258,7 +305,7 @@ class MarketRepository:
             with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(
                     """
-                    SELECT id, symbol, received_at, bid_flag, ask_flag
+                    SELECT id, symbol, source, received_at, bid_flag, ask_flag
                     FROM bidask_snapshots
                     WHERE symbol = %s
                     ORDER BY received_at DESC
