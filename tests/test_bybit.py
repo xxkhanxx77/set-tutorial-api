@@ -48,13 +48,10 @@ def test_tradfi_kline_payload_to_candles_maps_bybit_rows():
     ]
 
 
-def test_bybit_settings_parse_symbols_and_default_depth():
+def test_bybit_settings_parse_tradfi_symbols():
     settings = Settings(
         ENABLE_COLLECTOR=False,
         BYBIT_TRADFI_SYMBOLS="USDTHB+,xauusd+",
-        BYBIT_V5_SYMBOLS="BTCUSDT, ethusdt",
     )
 
     assert settings.bybit_tradfi_symbol_list == ["USDTHB+", "XAUUSD+"]
-    assert settings.bybit_v5_symbol_list == ["BTCUSDT", "ETHUSDT"]
-    assert settings.bybit_v5_depth_limit == 5

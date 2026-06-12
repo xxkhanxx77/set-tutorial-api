@@ -15,7 +15,6 @@ from set_bidask_service.repository import MarketRepository
 logger = logging.getLogger(__name__)
 
 BYBIT_TRADFI_SOURCE = "bybit_tradfi"
-BYBIT_V5_SOURCE_PREFIX = "bybit_v5"
 
 REQUEST_HEADERS = {
     "accept": "application/json,text/plain,*/*",
@@ -266,91 +265,5 @@ class BybitTradfiCollector:
                 self.state.update(last_candle_saved_at=utc_now_iso(), last_error=None)
         except Exception as exc:
             logger.exception("Failed to collect Bybit TradFi candles for %s", symbol)
-            self.state.increment("error_count")
-            self.state.update(last_error=str(exc))
-
-
-class BybitV5OrderbookCollector:
-    def __init__(self, settings: Settings, repository: MarketRepository):
-        self.settings = settings
-        self.repository = repository
-        self.state = PollingCollectorState()
-        self._stop_event = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._session = requests.Session()
-        self._session.headers.update({"user-agent": "settrade-bidask-railway/0.1"})
-
-    def start(self) -> None:
-        if self._thread and self._thread.is_alive():
-            return
-        self._stop_event.clear()
-        self._thread = threading.Thread(target=self._run, name="bybit-v5-orderbook", daemon=True)
-        self._thread.start()
-
-    def stop(self, timeout: float = 10.0) -> None:
-        self._stop_event.set()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=timeout)
-        self._session.close()
-
-    @property
-    def _base_url(self) -> str:
-        return self.settings.bybit_v5_base_url.rstrip("/")
-
-    @property
-    def _source(self) -> str:
-        return f"{BYBIT_V5_SOURCE_PREFIX}_{self.settings.bybit_v5_category}"
-
-    def _run(self) -> None:
-        self.state.update(running=True, started_at=utc_now_iso(), last_error=None)
-        try:
-            while not self._stop_event.is_set():
-                for symbol in self.settings.bybit_v5_symbol_list:
-                    if self._stop_event.is_set():
-                        break
-                    self._fetch_and_save(symbol)
-                self._stop_event.wait(self.settings.bybit_v5_poll_interval_seconds)
-        finally:
-            self.state.update(running=False)
-
-    def _fetch_and_save(self, symbol: str) -> None:
-        try:
-            response = self._session.get(
-                f"{self._base_url}/v5/market/orderbook",
-                params={
-                    "category": self.settings.bybit_v5_category,
-                    "symbol": symbol,
-                    "limit": self.settings.bybit_v5_depth_limit,
-                },
-                timeout=10,
-            )
-            self.state.increment("request_count")
-            response.raise_for_status()
-            payload = response.json()
-            if payload.get("retCode") != 0:
-                raise RuntimeError(
-                    f"Bybit V5 retCode={payload.get('retCode')} retMsg={payload.get('retMsg')}"
-                )
-
-            result = payload.get("result") or {}
-            bids = result.get("b") or []
-            asks = result.get("a") or []
-            self.state.update(last_message_at=utc_now_iso())
-            self.repository.save_order_book(
-                symbol=symbol,
-                source=self._source,
-                bids=bids[: self.settings.bybit_v5_depth_limit],
-                asks=asks[: self.settings.bybit_v5_depth_limit],
-                raw={
-                    "provider": "bybit_v5",
-                    "category": self.settings.bybit_v5_category,
-                    "depth_limit": self.settings.bybit_v5_depth_limit,
-                    **payload,
-                },
-            )
-            self.state.increment("saved_count")
-            self.state.update(last_saved_at=utc_now_iso(), last_error=None)
-        except Exception as exc:
-            logger.exception("Failed to collect Bybit V5 order book for %s", symbol)
             self.state.increment("error_count")
             self.state.update(last_error=str(exc))

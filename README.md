@@ -2,7 +2,7 @@
 
 Python service for Railway that subscribes to Settrade Open API realtime bid/offer data and saves the full 10-level order book to PostgreSQL.
 
-The service also exposes a small HTTP API so Railway has a healthcheck target and you can inspect the latest saved order book. Optional collectors can store Binance TH depth, Bybit V5 order books, and Bybit TradFi quotes in the same database.
+The service also exposes a small HTTP API so Railway has a healthcheck target and you can inspect the latest saved order book. Optional collectors can store Binance TH depth and Bybit TradFi `USDTHB+` quotes in the same database.
 
 ## Why Python
 
@@ -36,8 +36,6 @@ Optional candlestick backfills are saved to `candlesticks`.
 
 If `ENABLE_BINANCE_TH_COLLECTOR=true`, Binance TH depth snapshots are saved into the same `bidask_snapshots` and `bidask_levels` tables with `source='binance_th'`.
 
-If `ENABLE_BYBIT_V5_COLLECTOR=true`, regular Bybit V5 order books are saved with a source like `bybit_v5_linear`. Use this for symbols that are available through Bybit V5, for example `BTCUSDT`.
-
 If `ENABLE_BYBIT_TRADFI_COLLECTOR=true`, Bybit TradFi quotes such as `USDTHB+` are saved to `quote_ticks` and also mirrored into `bidask_levels` as level 1 only with `source='bybit_tradfi'`. Bybit does not expose a 5-level order book for `USDTHB+`; its public TradFi config marks `showOrderBook=false`.
 
 ## Project Structure
@@ -51,6 +49,7 @@ If `ENABLE_BYBIT_TRADFI_COLLECTOR=true`, Bybit TradFi quotes such as `USDTHB+` a
 ├── src/set_bidask_service/
 │   ├── main.py              # FastAPI app and Railway web process
 │   ├── collector.py         # Settrade realtime subscriber
+│   ├── bybit.py             # Bybit TradFi USDTHB+ quote collector
 │   ├── repository.py        # PostgreSQL inserts and queries
 │   ├── schema.py            # Database tables and indexes
 │   ├── transforms.py        # Bid/ask and candle payload parsing
@@ -90,11 +89,6 @@ BYBIT_TRADFI_POLL_INTERVAL_SECONDS=1.0
 BYBIT_TRADFI_CANDLE_INTERVAL=30
 BYBIT_TRADFI_CANDLE_LIMIT=2
 BYBIT_TRADFI_CANDLE_POLL_INTERVAL_SECONDS=60.0
-ENABLE_BYBIT_V5_COLLECTOR=false
-BYBIT_V5_CATEGORY=linear
-BYBIT_V5_SYMBOLS=BTCUSDT
-BYBIT_V5_DEPTH_LIMIT=5
-BYBIT_V5_POLL_INTERVAL_SECONDS=1.0
 ```
 
 Notes:
@@ -104,8 +98,7 @@ Notes:
 - `SETTRADE_SYMBOLS` is comma-separated. Use only symbols your Settrade account can access.
 - `SNAPSHOT_MIN_INTERVAL_MS=0` saves every bid/offer event. Increase it, for example to `250`, if the database write volume is too high.
 - `BINANCE_TH_SYMBOLS` is comma-separated and uses Binance TH symbols such as `USDTTHB` or `BTCTHB`. Binance TH public market data does not require an API key.
-- `BYBIT_TRADFI_SYMBOLS` is comma-separated and keeps the plus sign, for example `USDTHB+`. This feed is quote-only for `USDTHB+`.
-- `BYBIT_V5_SYMBOLS` is comma-separated and uses Bybit V5 symbols such as `BTCUSDT`. Set `BYBIT_V5_DEPTH_LIMIT=5` for a 5-level order book.
+- `BYBIT_TRADFI_SYMBOLS` is comma-separated and keeps the plus sign, for example `USDTHB+`. This feed is quote-only for `USDTHB+`; Bybit does not provide 5-level depth for this TradFi symbol.
 
 ## 2. Run Locally
 
@@ -156,10 +149,6 @@ railway variables set ENABLE_BINANCE_TH_COLLECTOR="true"
 railway variables set BINANCE_TH_SYMBOLS="USDTTHB"
 railway variables set ENABLE_BYBIT_TRADFI_COLLECTOR="true"
 railway variables set BYBIT_TRADFI_SYMBOLS="USDTHB+"
-railway variables set ENABLE_BYBIT_V5_COLLECTOR="true"
-railway variables set BYBIT_V5_CATEGORY="linear"
-railway variables set BYBIT_V5_SYMBOLS="BTCUSDT"
-railway variables set BYBIT_V5_DEPTH_LIMIT="5"
 ```
 
 Deploy:
@@ -249,14 +238,14 @@ WHERE source = 'bybit_tradfi'
   AND symbol = 'USDTHB+';
 ```
 
-Latest Bybit V5 5-level order book:
+Latest Bybit TradFi `USDTHB+` mirrored level-1 bid/ask:
 
 ```sql
 SELECT *
 FROM latest_bidask_10_levels
-WHERE source = 'bybit_v5_linear'
-  AND symbol = 'BTCUSDT'
-  AND level <= 5
+WHERE source = 'bybit_tradfi'
+  AND symbol = 'USDTHB+'
+  AND level = 1
 ORDER BY level;
 ```
 
