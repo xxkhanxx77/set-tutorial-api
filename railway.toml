@@ -1,5 +1,5 @@
 [build]
-builder = "NIXPACKS"
+builder = "DOCKERFILE"
 
 [deploy]
 startCommand = "uvicorn --app-dir src set_bidask_service.main:app --host 0.0.0.0 --port $PORT"
