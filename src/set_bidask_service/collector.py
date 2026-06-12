@@ -32,6 +32,7 @@ class CollectorState:
     saved_bidask_count: int = 0
     saved_price_info_count: int = 0
     error_count: int = 0
+    reconnect_count: int = 0
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def update(self, **changes: Any) -> None:
@@ -56,6 +57,7 @@ class CollectorState:
                 "saved_bidask_count": self.saved_bidask_count,
                 "saved_price_info_count": self.saved_price_info_count,
                 "error_count": self.error_count,
+                "reconnect_count": self.reconnect_count,
             }
 
 
@@ -66,6 +68,7 @@ class RealtimeCollector:
         self.state = CollectorState()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        self._reconnect_event = threading.Event()
         self._last_saved_monotonic: dict[str, float] = {}
         self._save_lock = threading.Lock()
 
@@ -86,6 +89,7 @@ class RealtimeCollector:
         retry_seconds = 5
 
         while not self._stop_event.is_set():
+            self._reconnect_event.clear()
             realtime = None
             subscribers = []
             try:
@@ -123,7 +127,9 @@ class RealtimeCollector:
                 self.state.update(connected=True, last_error=None)
 
                 while not self._stop_event.wait(1.0):
-                    pass
+                    if self._reconnect_event.is_set():
+                        logger.info("Reconnecting Settrade realtime collector")
+                        break
             except Exception as exc:
                 logger.exception("Settrade realtime collector failed")
                 self.state.increment("error_count")
@@ -164,9 +170,7 @@ class RealtimeCollector:
 
         if not result.get("is_success"):
             message = result.get("message") or result.get("data") or "unknown realtime error"
-            logger.warning("Bid/offer subscription error for %s: %s", symbol, message)
-            self.state.increment("error_count")
-            self.state.update(last_error=str(message))
+            self._handle_realtime_error("Bid/offer", symbol, message)
             return
 
         data = dict(result["data"])
@@ -189,9 +193,7 @@ class RealtimeCollector:
 
         if not result.get("is_success"):
             message = result.get("message") or result.get("data") or "unknown realtime error"
-            logger.warning("Price info subscription error for %s: %s", symbol, message)
-            self.state.increment("error_count")
-            self.state.update(last_error=str(message))
+            self._handle_realtime_error("Price info", symbol, message)
             return
 
         data = dict(result["data"])
@@ -205,3 +207,14 @@ class RealtimeCollector:
             logger.exception("Failed to save price info payload for %s", symbol)
             self.state.increment("error_count")
             self.state.update(last_error=str(exc))
+
+    def _handle_realtime_error(self, feed_name: str, symbol: str, message: Any) -> None:
+        message_text = str(message)
+        logger.warning("%s subscription error for %s: %s", feed_name, symbol, message_text)
+        self.state.increment("error_count")
+        self.state.update(last_error=message_text)
+
+        if "disconnected" in message_text.lower():
+            self.state.increment("reconnect_count")
+            self.state.update(connected=False)
+            self._reconnect_event.set()
