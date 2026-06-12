@@ -74,13 +74,13 @@ SETTRADE_APP_SECRET=your_app_secret
 SETTRADE_APP_CODE=ALGO
 SETTRADE_BROKER_ID=your_broker_id
 SETTRADE_ENV=prod
-SETTRADE_SYMBOLS=AOT,PTT
+SETTRADE_SYMBOLS=USDM26,MGOM26,MGOU26
 ENABLE_COLLECTOR=true
 SUBSCRIBE_PRICE_INFO=true
 SNAPSHOT_MIN_INTERVAL_MS=0
 LOG_LEVEL=INFO
 ENABLE_BINANCE_TH_COLLECTOR=false
-BINANCE_TH_SYMBOLS=USDTTHB
+BINANCE_TH_SYMBOLS=USDTTHB,PAXGUSDT
 BINANCE_TH_DEPTH_LIMIT=10
 BINANCE_TH_POLL_INTERVAL_SECONDS=1.0
 ENABLE_BYBIT_TRADFI_COLLECTOR=false
@@ -97,7 +97,7 @@ Notes:
 - Use `SETTRADE_ENV=uat`, `SETTRADE_APP_CODE=SANDBOX`, and `SETTRADE_BROKER_ID=SANDBOX` for sandbox credentials.
 - `SETTRADE_SYMBOLS` is comma-separated. Use only symbols your Settrade account can access.
 - `SNAPSHOT_MIN_INTERVAL_MS=0` saves every bid/offer event. Increase it, for example to `250`, if the database write volume is too high.
-- `BINANCE_TH_SYMBOLS` is comma-separated and uses Binance TH symbols such as `USDTTHB` or `BTCTHB`. Binance TH public market data does not require an API key.
+- `BINANCE_TH_SYMBOLS` is comma-separated and uses Binance TH symbols such as `USDTTHB`, `PAXGUSDT`, or `BTCTHB`. Binance TH public market data does not require an API key.
 - `BYBIT_TRADFI_SYMBOLS` is comma-separated and keeps the plus sign, for example `USDTHB+`. This feed is quote-only for `USDTHB+`; Bybit does not provide 5-level depth for this TradFi symbol.
 
 ## 2. Run Locally
@@ -142,11 +142,11 @@ railway variables set SETTRADE_APP_SECRET="..."
 railway variables set SETTRADE_APP_CODE="ALGO"
 railway variables set SETTRADE_BROKER_ID="..."
 railway variables set SETTRADE_ENV="prod"
-railway variables set SETTRADE_SYMBOLS="AOT,PTT"
+railway variables set SETTRADE_SYMBOLS="USDM26,MGOM26,MGOU26"
 railway variables set ENABLE_COLLECTOR="true"
 railway variables set SUBSCRIBE_PRICE_INFO="true"
 railway variables set ENABLE_BINANCE_TH_COLLECTOR="true"
-railway variables set BINANCE_TH_SYMBOLS="USDTTHB"
+railway variables set BINANCE_TH_SYMBOLS="USDTTHB,PAXGUSDT"
 railway variables set ENABLE_BYBIT_TRADFI_COLLECTOR="true"
 railway variables set BYBIT_TRADFI_SYMBOLS="USDTHB+"
 ```
@@ -249,7 +249,56 @@ WHERE source = 'bybit_tradfi'
 ORDER BY level;
 ```
 
-## 5. Optional Candlestick Backfill
+## 5. Gold Spread Pair: TFEX Mini Gold Online (MGO) vs Binance TH PAXG/USDT
+
+Both markets quote gold in **US dollars per troy ounce**, so their books are directly comparable:
+
+- **Binance TH `PAXGUSDT`**: PAXG is a gold token where 1 PAXG = 1 troy oz of LBMA gold. Quoted in USDT (≈ 1 USD).
+- **TFEX `MGO` Mini Gold Online Futures** (via Settrade): cash-settled futures on 99.5% gold.
+
+Key MGO contract facts (from TFEX specs):
+
+| Item | Detail |
+|---|---|
+| Symbol | `MGO` + month code + 2-digit year, e.g. `MGOM26` = June 2026 |
+| Contract months | Quarterly only: H=Mar, M=Jun, U=Sep, Z=Dec; 2 nearest quarters listed |
+| Quotation | USD per troy ounce, 1 decimal |
+| Multiplier | 30 (quanto: P&L is THB 30 per 1.0 USD price move, no FX conversion) |
+| Tick | 0.1 USD/oz = THB 3 per contract |
+| Daily price limit | ±10% of last settlement (expands to ±20% after a halt) |
+| Sessions | 09:45–12:30, 14:15–16:55, night 18:50–03:00 |
+| Last trading day | Business day before the last business day of the contract month, trading ends 16:30 |
+| Settlement | Cash, to LBMA Gold AM Fixing (ICE Benchmark Administration), no FX applied |
+
+Collector setup: add `MGOM26,MGOU26` to `SETTRADE_SYMBOLS` and `PAXGUSDT` to
+`BINANCE_TH_SYMBOLS`. Logging both quarterly contracts keeps data flowing across expiry
+(e.g. `MGOM26` stops trading near end of June 2026; `MGOU26` continues).
+
+Sizing note for any spread analysis: 1 MGO contract has THB 30 of P&L per 1 USD move (quanto),
+while 1 PAXG has ~1 USDT of P&L per 1 USD move. At USDTHB ≈ 33 a delta-matched pair is roughly
+**1 MGO contract ↔ 0.9 PAXG**, not 1:1.
+
+Latest MGO book:
+
+```sql
+SELECT *
+FROM latest_bidask_10_levels
+WHERE source = 'settrade'
+  AND symbol = 'MGOM26'
+ORDER BY level;
+```
+
+Latest PAXG/USDT book:
+
+```sql
+SELECT *
+FROM latest_bidask_10_levels
+WHERE source = 'binance_th'
+  AND symbol = 'PAXGUSDT'
+ORDER BY level;
+```
+
+## 6. Optional Candlestick Backfill
 
 Fetch historical candles through Settrade SDK and save them to the `candlesticks` table:
 
@@ -270,7 +319,7 @@ uv run python -m set_bidask_service.backfill_candles \
   --end "2026-06-11T23:59:59+07:00"
 ```
 
-## 6. Local Checks
+## 7. Local Checks
 
 ```bash
 uv run pytest
