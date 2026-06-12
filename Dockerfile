@@ -20,6 +20,6 @@ RUN uv sync --no-dev --frozen
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-EXPOSE 8080
-
+# No EXPOSE on purpose: Railway infers the target port from EXPOSE when present,
+# which can conflict with the PORT it injects. Bind to $PORT only.
 CMD ["sh", "-c", "uvicorn --app-dir src set_bidask_service.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
