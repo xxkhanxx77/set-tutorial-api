@@ -74,7 +74,7 @@ SETTRADE_APP_SECRET=your_app_secret
 SETTRADE_APP_CODE=ALGO
 SETTRADE_BROKER_ID=your_broker_id
 SETTRADE_ENV=prod
-SETTRADE_SYMBOLS=USDM26,MGOM26,MGOU26
+SETTRADE_SYMBOLS=USDM26,MGOM26,MGOU26,GOM26,GOU26
 ENABLE_COLLECTOR=true
 SUBSCRIBE_PRICE_INFO=true
 SNAPSHOT_MIN_INTERVAL_MS=0
@@ -142,7 +142,7 @@ railway variables set SETTRADE_APP_SECRET="..."
 railway variables set SETTRADE_APP_CODE="ALGO"
 railway variables set SETTRADE_BROKER_ID="..."
 railway variables set SETTRADE_ENV="prod"
-railway variables set SETTRADE_SYMBOLS="USDM26,MGOM26,MGOU26"
+railway variables set SETTRADE_SYMBOLS="USDM26,MGOM26,MGOU26,GOM26,GOU26"
 railway variables set ENABLE_COLLECTOR="true"
 railway variables set SUBSCRIBE_PRICE_INFO="true"
 railway variables set ENABLE_BINANCE_TH_COLLECTOR="true"
@@ -249,36 +249,39 @@ WHERE source = 'bybit_tradfi'
 ORDER BY level;
 ```
 
-## 5. Gold Spread Pair: TFEX Mini Gold Online (MGO) vs Binance TH PAXG/USDT
+## 5. Gold Spread Pair: TFEX Gold Futures (MGO / GO) vs Binance TH PAXG/USDT
 
-Both markets quote gold in **US dollars per troy ounce**, so their books are directly comparable:
+All three markets quote gold in **US dollars per troy ounce**, so their books are directly comparable:
 
 - **Binance TH `PAXGUSDT`**: PAXG is a gold token where 1 PAXG = 1 troy oz of LBMA gold. Quoted in USDT (≈ 1 USD).
-- **TFEX `MGO` Mini Gold Online Futures** (via Settrade): cash-settled futures on 99.5% gold.
+- **TFEX `MGO` Mini Gold Online Futures** and **`GO` Gold Online Futures** (via Settrade): cash-settled futures on 99.5% gold. Same product design; only the multiplier differs.
 
-Key MGO contract facts (from TFEX specs):
+Key contract facts (from TFEX specs):
 
-| Item | Detail |
-|---|---|
-| Symbol | `MGO` + month code + 2-digit year, e.g. `MGOM26` = June 2026 |
-| Contract months | Quarterly only: H=Mar, M=Jun, U=Sep, Z=Dec; 2 nearest quarters listed |
-| Quotation | USD per troy ounce, 1 decimal |
-| Multiplier | 30 (quanto: P&L is THB 30 per 1.0 USD price move, no FX conversion) |
-| Tick | 0.1 USD/oz = THB 3 per contract |
-| Daily price limit | ±10% of last settlement (expands to ±20% after a halt) |
-| Sessions | 09:45–12:30, 14:15–16:55, night 18:50–03:00 |
-| Last trading day | Business day before the last business day of the contract month, trading ends 16:30 |
-| Settlement | Cash, to LBMA Gold AM Fixing (ICE Benchmark Administration), no FX applied |
+| Item | MGO (Mini) | GO |
+|---|---|---|
+| Symbol example | `MGOM26` = June 2026 | `GOM26` = June 2026 |
+| Contract months | Quarterly only: H=Mar, M=Jun, U=Sep, Z=Dec; 2 nearest quarters listed | same |
+| Quotation | USD per troy ounce, 1 decimal | same |
+| Multiplier | 30 (quanto: P&L is THB 30 per 1.0 USD move, no FX) | 300 (THB 300 per 1.0 USD move) |
+| Tick size (minimum price step) | 0.1 USD/oz = THB 3 per contract | 0.1 USD/oz = THB 30 per contract |
+| Daily price limit | ±10% of last settlement (expands to ±20% after a halt) | same |
+| Sessions | 09:45–12:30, 14:15–16:55, night 18:50–03:00 | same |
+| Last trading day | Business day before the last business day of the contract month, trading ends 16:30 | same |
+| Settlement | Cash, to LBMA Gold AM Fixing (ICE Benchmark Administration), no FX applied | same |
 
-Collector setup: add `MGOM26,MGOU26` to `SETTRADE_SYMBOLS` and `PAXGUSDT` to
+Note: the tick size is the **minimum price step**, not a fee. Trading fees are brokerage +
+exchange fee + VAT, charged per contract by your broker.
+
+Collector setup: add `MGOM26,MGOU26,GOM26,GOU26` to `SETTRADE_SYMBOLS` and `PAXGUSDT` to
 `BINANCE_TH_SYMBOLS`. Logging both quarterly contracts keeps data flowing across expiry
-(e.g. `MGOM26` stops trading near end of June 2026; `MGOU26` continues).
+(e.g. `MGOM26`/`GOM26` stop trading near end of June 2026; the U26 contracts continue).
 
-Sizing note for any spread analysis: 1 MGO contract has THB 30 of P&L per 1 USD move (quanto),
-while 1 PAXG has ~1 USDT of P&L per 1 USD move. At USDTHB ≈ 33 a delta-matched pair is roughly
-**1 MGO contract ↔ 0.9 PAXG**, not 1:1.
+Sizing note for any spread analysis (quanto contracts, THB P&L vs USDT P&L): 1 PAXG has ~1 USDT
+of P&L per 1 USD move. At USDTHB ≈ 33 a delta-matched pair is roughly
+**1 MGO ↔ 0.9 PAXG** and **1 GO ↔ 9 PAXG**, not 1:1.
 
-Latest MGO book:
+Latest MGO book (same query works for `GOM26`):
 
 ```sql
 SELECT *
